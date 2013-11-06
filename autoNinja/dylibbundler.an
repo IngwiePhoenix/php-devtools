@@ -1,0 +1,28 @@
+<?php
+
+# Generator for dylibbundler
+
+check('g++',4);
+
+rule(
+	'cxx',
+	'g++ -I./src -c $in -o $out',
+	'CXX: $out'
+);
+
+rule(
+	'exe',
+	'g++ -I./src $in -o $out',
+	'Executable: $out'
+);
+
+$outs=[];
+
+foreach(glob("./*.cpp") as $in) {
+	$out = out($in);
+	$outs[]=$out;
+	echo "=> Adding <$in> -> <$out>\n"; 
+	source("cxx", $in, $out);
+}
+
+source("exe", implode(" ",$outs), './dylibbundler');

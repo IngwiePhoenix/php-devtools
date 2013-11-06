@@ -1,0 +1,32 @@
+<?php
+
+setVar('cflags','-DLIBOPENSSL -DLIBNCURSES -DHAVE_MATH_H');
+setVar('libs','-lcurses -lssl -lcrypto -L/usr/lib -L/usr/local/lib -L/lib -L/usr/lib');
+
+check('gcc',4);
+
+rule(
+	'cc',
+	'gcc -I. -O3 -c $in -o $out $cflags',
+	'CC: $out'
+);
+
+rule(
+	'exe',
+	'gcc -I. -O3 $libs -o $out $in $cflags',
+	'Executable: $out'
+);
+
+$outs=[];
+$ignore=['./pw-inspector.c'];
+
+foreach(glob("./*.c") as $in) {
+	if(in_array($in, $ignore)) continue;
+	$out = out($in);
+	$outs[]=$out;
+	echo "=> Adding <$in> -> <$out>\n"; 
+	source("cc", $in, $out);
+}
+
+source("exe", implode(" ",$outs), './hydra');
+source('exe', 'pw-inspector.c', 'pw-inspector');
