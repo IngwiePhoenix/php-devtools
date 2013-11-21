@@ -3,12 +3,33 @@
 	public function main($argc, $argv) {
 		$os=$this->getopt($argv);
 		if(!empty($os['f'])) {
-			$source = $this->createSource(file_get_contents($os['f'][0]));
-			echo "-> Writing to: {$os['o']}\n";
-			file_put_contents($os['o'].".c", $source);
+			// We have something to compile.
+			$objs = array();
+			foreach($os['f'] as $src) {
+				if(isset($os['v'])) echo "-> Working: $src\n";
+				if(is_readable($src)) {
+					$objs[] = $this->createObject(file_get_contents($src));
+				} else {
+					die("!> Could not work <{$src}> - file not readable.\n");
+				}
+			}
+			// Build the source code
+			if(isset($os['v'])) echo "-> Creating source off ".count($objs)." objects\n";
+			$source = $this->createSource($objs);
+			$fname = null;
+			if(isset($os['p'])) {
+				// The user wants to print the C files - so save them to the output path
+				$fname = $os['o'].".c";
+			} else {
+				$fname = sys_get_temp_dir().DIRECTORY_SEPARATOR.uniqid()."-pcc.c";
+			}
+			if(isset($os['v'])) echo "-> Source code saved to: {$fname}\n";
+			// output
+			file_put_contents($fname, $source);				
 			$me = dirname(__FILE__);
+			// compile
 			$cmd = "gcc -w -I$me $me/ph7.c {$os['o']}.c -o {$os['o']}";
-			echo "-> Compiling\n$cmd\n";
+			if(isset($os['v'])) echo "-> Compiling: {$cmd}\n";
 			system($cmd);
 		} else {
 			echo implode("\n", array(
@@ -37,12 +58,12 @@
 			"-f",  // = File
 			"-o",  // = Output file
 			"-i",  // = Included file (Will be written in preprocessing)
-			"-e"   // = PHP binary
+			"-p",   // = Print the source to where the -o utput is.
+			"-v"    // Be verbose
 		);
 		for($i=1; $i <= count($argv); null) {
 			$i==10 && print_r($argv) && die();
 			$v=$argv[$i];
-			#echo "Index: $i, Value: $v, Count: ".count($argv)."\n";
 			if(strlen($v)!=2 && in_array(substr($v,0,2), $opts)) {
 				$argv[$i] = substr($v,0,2);					// insert arg back to place
 				array_splice($argv, $i+1, 0, substr($v,2)); // add val after
@@ -67,9 +88,13 @@
 					$args["o"]=$argv[$i+1];
 					$i=$i+2;
 				break;
-				case "-e":
-					$args["e"]=$argv[$i+1];
-					$i=$i+2;
+				case "-p":
+					$args["p"]=true;
+					$i++;
+				break;
+				case "-v":
+					$args["v"]=true;
+					$i++;
 				break;
 				default:
 					if(file_exists($v)) { $args["f"][]=$v; }
@@ -80,38 +105,31 @@
 		return $args;
 	}
 	
-	public function stripComments($input) {
-		$newStr  = '';
-		$commentTokens = array(T_COMMENT);
-		if (defined('T_DOC_COMMENT'))
-    		$commentTokens[] = T_DOC_COMMENT; // PHP 5
-		if (defined('T_ML_COMMENT'))
-    		$commentTokens[] = T_ML_COMMENT;  // PHP 4
-
-		$tokens = token_get_all($input);
-		foreach ($tokens as $token) {    
-    		if (is_array($token)) {
-        		if (in_array($token[0], $commentTokens)){
-            		continue;
-            	}
-        		$token = $token[1];
-    		}
-    		$newStr .= $token;
-		}
-		return $newStr;
-	}
-	public function compileObject($in, $out) { }
-	public function compileExecutable(array $ins, $out) { }
-	public function findLibs() { }
-	public function createSource($phpString) {
+	public function createObject($phpString) {
 		// Edit the source
-		$phpString = addslashes($phpString);
+		$phpString = trim(addslashes($phpString));
 		$phpStringArray = explode("\n",$phpString);
+		$count=count($phpStringArray);
 		foreach($phpStringArray as $index=>$string) {
-			$phpStringArray[$index] = '"'.$string.'\\n"';
+			if($count <= $index) {
+				$nl = '\\n';
+			} else {
+				$nl = null;
+			}
+			$phpStringArray[$index] = '"'.$string.$nl.'"';
 		}
-		$phpString=implode("\n",$phpStringArray);
+		return $phpStringArray; #Array
+	}
+	public function createSource($objs) {
+		// Joined array of everything.
+		$phpStringArray=array();
+		foreach($objs as $obj) {
+			// Each object is one exploded script
+			$phpStringArray = array_merge($phpStringArray, $obj);
+		}
+		$phpString = implode("\n",$phpStringArray);
 		
+		// Source generator
 		$c = '// Generated using PCC
 			#include "ph7.h"
 			#include <stdio.h>
