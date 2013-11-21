@@ -109,9 +109,9 @@
 		// Edit the source
 		$phpString = trim(addslashes($phpString));
 		$phpStringArray = explode("\n",$phpString);
-		$count=count($phpStringArray);
+		$count=count($phpStringArray)-1;
 		foreach($phpStringArray as $index=>$string) {
-			if($count <= $index) {
+			if($count !== $index) {
 				$nl = '\\n';
 			} else {
 				$nl = null;
