@@ -145,20 +145,23 @@
 			#endif
 
 			static void Fatal(const char *zMsg) { puts(zMsg); ph7_lib_shutdown(); exit(0); }
-
-			#include <stdint.h>
-			#include <mach-o/dyld.h>
-			char *getMe() {
-				char path[1024];
-				char *empty=" ";
-				uint32_t *size = (uint32_t)sizeof(path);
-				if( _NSGetExecutablePath(path, &size) == 0 ) {
-					return path;
-				} else {
-					printf("Error with exe\n");
-					return empty;
+			
+			#ifdef __APPLE__
+				#define HAS_getMe
+				#include <stdint.h>
+				#include <mach-o/dyld.h>
+				char *getMe() {
+					char path[1024];
+					char *empty=" ";
+					uint32_t *size = (uint32_t)sizeof(path);
+					if( _NSGetExecutablePath(path, &size) == 0 ) {
+						return path;
+					} else {
+						printf("Error with exe\n");
+						return empty;
+					}
 				}
-			}
+			#endif
 			
 			int ph7_fnc_system(ph7_context *pCtx, int argc, ph7_value **argv) {
 				const char *cmd = ph7_value_to_string(argv[0], NULL);
@@ -166,11 +169,13 @@
 				ph7_result_int(pCtx, res);
 				return PH7_OK;
 			}
+			#ifdef HAS_getMe
 			void ph7_getMe(ph7_value *pVal, void *userData) {
 				char *me = getMe();
 				int *nlen=(int*)sizeof(me);
 				ph7_value_string(pVal, me, -1);
 			}
+			#endif
 
 			static int Output_Consumer(const void *pOutput, unsigned int nOutputLen, void *pUserData/* Unused */) {
 			#ifdef __WINNT__
@@ -218,8 +223,11 @@
 				ph7_fnc_system,
 				0
 			);
+			
+			#ifdef HAS_getMe
 			// fix __FILE__
 			ph7_create_constant(pVm, "__FILE__", ph7_getMe, 0);
+			#endif
 			
 			// argc, argv
 			ph7_value *pArgc = ph7_new_scalar(pVm);
