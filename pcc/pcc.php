@@ -1,7 +1,34 @@
 <?php class Compiler {
 
 	public function main($argc, $argv) {
-		print_r( $this->getopt($argv) );
+		$os=$this->getopt($argv);
+		if(!empty($os['f'])) {
+			$source = $this->createSource(file_get_contents($os['f'][0]));
+			echo "-> Writing to: {$os['o']}\n";
+			file_put_contents($os['o'].".c", $source);
+			$me = dirname(__FILE__);
+			$cmd = "gcc -w -I$me $me/ph7.c {$os['o']}.c -o {$os['o']}";
+			echo "-> Compiling\n$cmd\n";
+			system($cmd);
+		} else {
+			echo implode("\n", array(
+				"PCC by Ingwie Phoenix",
+				" ",
+				"Php Code Compiler lets you compile your PHP source into a C file, using the ph7 embedded engine.",
+				" ",
+				" ",
+				"Usage: pcc [-i file] [-f file] [-e php_binary] [-o output] file...",
+				" ",
+				"   -f file :: Add this file to the compilation.",
+				"   -i file :: Include this file even if it's not found in the source.",
+				"   -e bin  :: Specify a different PHP binary to operate with (not required if using the compiled version of PCC).",
+				"   -o out  :: Name of the output binary.",
+				"   file    :: Same as -f.",
+				" ",
+				"Example: pcc ./foo.php -o foo"
+			))."\n";
+			return 0;
+		}
 	}
 	
 	public function getopt($argv) {
@@ -53,8 +80,150 @@
 		return $args;
 	}
 	
-	public function compileObject($in, $out) {}
-	public function compileExecurable(array $ins, $out) {}
-	public function findLibs() {}
+	public function stripComments($input) {
+		$newStr  = '';
+		$commentTokens = array(T_COMMENT);
+		if (defined('T_DOC_COMMENT'))
+    		$commentTokens[] = T_DOC_COMMENT; // PHP 5
+		if (defined('T_ML_COMMENT'))
+    		$commentTokens[] = T_ML_COMMENT;  // PHP 4
 
-} return (new Compiler)->main($argc, $argv); ?>
+		$tokens = token_get_all($input);
+		foreach ($tokens as $token) {    
+    		if (is_array($token)) {
+        		if (in_array($token[0], $commentTokens)){
+            		continue;
+            	}
+        		$token = $token[1];
+    		}
+    		$newStr .= $token;
+		}
+		return $newStr;
+	}
+	public function compileObject($in, $out) { }
+	public function compileExecutable(array $ins, $out) { }
+	public function findLibs() { }
+	public function createSource($phpString) {
+		// Edit the source
+		$phpString = addslashes($phpString);
+		$phpStringArray = explode("\n",$phpString);
+		foreach($phpStringArray as $index=>$string) {
+			$phpStringArray[$index] = '"'.$string.'\\n"';
+		}
+		$phpString=implode("\n",$phpStringArray);
+		
+		$c = '// Generated using PCC
+			#include "ph7.h"
+			#include <stdio.h>
+			#include <stdlib.h>
+			#ifdef __WINNT__
+			#include <Windows.h>
+			#else
+			/* Assume UNIX */
+			#include <unistd.h>
+			#endif
+			#ifndef STDOUT_FILENO
+			#define STDOUT_FILENO	1
+			#endif
+
+			static void Fatal(const char *zMsg) { puts(zMsg); ph7_lib_shutdown(); exit(0); }
+
+			#include <stdint.h>
+			#include <mach-o/dyld.h>
+			char *getMe() {
+				char path[1024];
+				char *empty=" ";
+				uint32_t *size = (uint32_t)sizeof(path);
+				if( _NSGetExecutablePath(path, &size) == 0 ) {
+					return path;
+				} else {
+					printf("Error with exe\n");
+					return empty;
+				}
+			}
+			
+			int ph7_fnc_system(ph7_context *pCtx, int argc, ph7_value **argv) {
+				const char *cmd = ph7_value_to_string(argv[0], NULL);
+				int res = system(cmd);
+				ph7_result_int(pCtx, res);
+				return PH7_OK;
+			}
+			void ph7_getMe(ph7_value *pVal, void *userData) {
+				char *me = getMe();
+				int *nlen=(int*)sizeof(me);
+				ph7_value_string(pVal, me, -1);
+			}
+
+			static int Output_Consumer(const void *pOutput, unsigned int nOutputLen, void *pUserData/* Unused */) {
+			#ifdef __WINNT__
+				BOOL rc;
+				rc = WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), pOutput, (DWORD)nOutputLen, 0, 0);
+				if( !rc ){
+					/* Abort processing */
+					return PH7_ABORT;
+				}
+			#else
+				ssize_t nWr;
+				nWr = write(STDOUT_FILENO, pOutput, nOutputLen);
+				if( nWr < 0 ){
+					/* Abort processing */
+					return PH7_ABORT;
+				}
+			#endif /* __WINT__ */
+			return PH7_OK;
+		}
+
+		int main(int argc, char *argv[]) {
+			ph7 *pEngine; /* PH7 engine */
+			ph7_vm *pVm;  /* Compiled PHP program */
+			int rc;
+			rc = ph7_init(&pEngine);
+			if( rc != PH7_OK ){ Fatal("Error while allocating a new PH7 engine instance"); }
+
+			rc = ph7_compile_v2( pEngine, '.$phpString.', -1, &pVm, 0);
+			if( rc != PH7_OK ){
+				if( rc == PH7_COMPILE_ERR ){
+					const char *zErrLog;
+					int nLen;
+					ph7_config( pEngine, PH7_CONFIG_ERR_LOG, &zErrLog, &nLen );
+					if( nLen > 0 ){ puts(zErrLog); }
+				} Fatal("Compile error");
+			}
+
+			rc = ph7_vm_config( pVm, PH7_VM_CONFIG_OUTPUT, Output_Consumer, 0 );
+			if( rc != PH7_OK ){ Fatal("Error while installing the VM output consumer callback"); }
+			
+			// funcs
+			ph7_create_function(
+				pVm,
+				"system",
+				ph7_fnc_system,
+				0
+			);
+			// fix __FILE__
+			ph7_create_constant(pVm, "__FILE__", ph7_getMe, 0);
+			
+			// argc, argv
+			ph7_value *pArgc = ph7_new_scalar(pVm);
+			ph7_value_int(pArgc, argc);
+			rc = ph7_vm_config( pVm, PH7_VM_CONFIG_CREATE_VAR, "argc", pArgc );
+			if( rc != PH7_OK ){ Fatal("Error while installing argc\n"); }
+			for(int i=0; i<=argc-1; i++) {
+				// PH7_VM_CONFIG_ARGV_ENTRY
+				rc = ph7_vm_config( pVm, PH7_VM_CONFIG_ARGV_ENTRY, argv[i] );
+				if( rc != PH7_OK ){ Fatal("Error while installing argv\n"); }
+			}
+
+
+			ph7_vm_config(pVm, PH7_VM_CONFIG_ERR_REPORT);
+		
+			ph7_vm_exec(pVm, 0);
+
+			ph7_vm_release(pVm);
+			ph7_release(pEngine);
+			return 0;
+		}';
+		return $c;
+	}
+
+} $cmp=new Compiler; $cmp->main($argc, $argv);

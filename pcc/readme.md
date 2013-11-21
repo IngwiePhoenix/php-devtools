@@ -3,47 +3,34 @@
 The command `pcc` was previously used by the roadsend PHP compiler. But sadly, all these gorgerous projects stopped - and facebook's hiphop only works on a **VERY** limited amount of platforms. So basically I am screwed =). But to get around this, I decided to code a little bit of own code to "compile" things - in fact, pcc aims to put PHP code, its libraries, and the PHP binary into a sort of bundle. It does not sound easy, but challenging!
 
 
-## Test invocation
-```bash
-php pcc.php -ffoo.php -f bar.php -i baz.php -o a.out
-```
+# Requirements
+- ANSI-C Compiler (tested on Clang -dumpversion => 4.2.1)
+- OR PHP 5.x
 
 
-## Concept
+# Usage
+You can use this script as it is, modify it or whatever - even run it under a regular PHP binary. But you can also compile it into a stand-alone binary which does not even require PHP. To do so, there is a pcc.c file - which is ap re-generated source file. To compile pcc now run:
 
-1. PCC will first make note of the files, and then iterate over them to detect include(_once) or require(_once) calls, and add the files into the list and comparing them to avoid duplicates.
-2. Then it will start to bring the files into order in which they need to be loaded/executed. In other words, it builds a big file structure and lets it end up as a sort-of PHAR.
-3. Now we have the file, probably quite large =). We now grab the PHP binary. We also compress our single PHP file.
-4. Now we also need to grab the libraries...how I am gonna do that - eighter write a parser for `otool -L` or `ld`...and we of course copy them into our folder too. We will use our self-copied binary to detect libraries. We also will have to change the linker-arguments a little so we can create a more porbable structure.
-5. We now should have:
-	- php <- Executable
-	- script.php <- Our script
-	- library.... <- our libs. like, libcurl and such.
-6. If above is right, we now need to compress it all into a rather big executable. here on, we may make use of C. We first convert the php script into base64, same with a compressed version of the binary and the libraries. C now needs to be auto-generated, to have all the lists and such. And voila, large, large file...
-7. use gcc to compile the now-created file. The file now is not the smallest, but well...
-8. The output binary now needs to do:
-	1. Find a temporary folder.
-	2. Extract binary, library and script.
-	3. Run the script
+    gcc -O3 ph7.c pcc.c -o pcc
+    
+and you can call ./pcc just like a regular binary.
 
-This is not a "real" compression, and not the most elegant method, but we are able to close down our source code and execute it on different plattforms...at least, we dont need PHP everywhere.
+**NOTE**: The `__FILE__` constant is currently only working correctly on Mac OS X. Further support is planned.
 
-## Notice...
-When we grab the binary, you WILL loose all your extensions, if they arent compiled into PHP itself. Therefore, use a configuration like this:
+After you compiled, you can look up the options by just running the binary without any option.
 
-```bash
-./configure \
-	--enable-embed=static \
-	--enable-static=yes
-```
+You can use it to re-compile itself if you want too:
 
-Now you just add --with-MODULE or --enable-SOMETHING to add it into your binary. See the PHP manual for staticaly compiling PHP.
+    ./pcc ./pcc.php -o pcc
+    
+This will re-generate pcc.c and produce a new pcc binary.
+
+To change the used binary, change it in the source code...there will be a switch for changing the compiler and flags ASAP. But it works as long as you can access GCC - you can even symlink clang or MS' compiler and do so. MinGW should work OOB.
+
+To run this properly, you need pcc.php or the pcc binary together in a folder with ph7.c and ph7.h.
 
 
-# This is just a concept.
+# Resources
+The real ph7 project: http://ph7.symisc.net/
 
-It may work, it may not work. Whatever, this is basically what I have imagined for a little work-around for having no real compiler =)
-
-If you want more information, read pcc.php :)
-
-Of course, you are free to support me! ^.^
+License is included as license.txt - pcc follows the same license, although I haven't typed it out yet. At least, the same scheme.
